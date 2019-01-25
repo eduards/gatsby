@@ -1,6 +1,7 @@
 const React = require(`react`)
 const fs = require(`fs`)
 const { join } = require(`path`)
+const crypto = require(`crypto`)
 const { renderToString, renderToStaticMarkup } = require(`react-dom/server`)
 const { ServerLocation, Router, isRedirect } = require(`@reach/router`)
 const { get, merge, isObject, flatten, uniqBy } = require(`lodash`)
@@ -52,7 +53,7 @@ const createElement = React.createElement
 export default (pagePath, callback) => {
   let bodyHtml = ``
   let headComponents = [
-    <meta name="generator" content={`Gatsby ${gatsbyVersion}`} />,
+    <meta key="1" name="generator" content={`Gatsby ${gatsbyVersion}`} />,
   ]
   let htmlAttributes = {}
   let bodyAttributes = {}
@@ -371,6 +372,48 @@ export default (pagePath, callback) => {
     pathname: pagePath,
     pathPrefix: __PATH_PREFIX__,
   })
+
+  // Helper functions
+  const isInlineSrcElement = x =>
+    x.type === `script` && x.props.dangerouslySetInnerHTML != null
+  // TODO
+  // const isInlineStyleElement = x =>
+  //   x.type === `style` && x.props.dangerouslySetInnerHTML != null
+  const createHash = elemen =>
+    `'sha256-${crypto
+      .createHash(`sha256`)
+      .update(elemen.props.dangerouslySetInnerHTML.__html, `utf-8`)
+      .digest(`base64`)}'`
+
+  // Calculate CSP hashes for inline elements
+  const allElements = [
+    ...flatten(headComponents),
+    ...flatten(preBodyComponents),
+    ...flatten(postBodyComponents),
+  ]
+  const scriptHashes = allElements
+    .filter(isInlineSrcElement)
+    .map(createHash)
+    .join(` `)
+  // TODO
+  // const styleHashes = allElements
+  //   .filter(isInlineStyleElement)
+  //   .map(createHash)
+  //   .join(` `)
+
+  // Additinal entries specified by the user
+  const userScriptSrc = [`https://www.google-analytics.com`].join(` `)
+  const userImgSrc = [`https://www.google-analytics.com`].join(` `)
+
+  // Create the CSP meta element and add it as the first meta element
+  const cspMetaElement = (
+    <meta
+      key="0"
+      httpEquiv="Content-Security-Policy"
+      content={`img-src 'self' data: ${userImgSrc}; script-src 'self' ${scriptHashes} ${userScriptSrc}; style-src 'self' 'unsafe-inline';`}
+    />
+  )
+  headComponents.unshift(cspMetaElement)
 
   const html = `<!DOCTYPE html>${renderToStaticMarkup(
     <Html
